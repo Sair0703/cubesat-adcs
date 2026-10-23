@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CubeSat Attitude Control – Live Flight Software Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --paper: #f2f0e8; --card: #fbfaf5; --ink: #14213d; --muted: #5d6475; --grid: #dcd8cb;
+  --signal: #d9541e; --est: #1f8a7e; --safe: #b42318; --ok: #2f6f3e; --warn: #a15c00;
+  --focus: #2457c5; --dial: #e9e6db;
+  color-scheme: light; box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0e1424; --card: #151d31; --ink: #e8e6dd; --muted: #9aa3b8; --grid: #26304a;
+    --signal: #ff7a45; --est: #4cc3b4; --safe: #ff6b5e; --ok: #6fcf86; --warn: #f0b44c;
+    --focus: #8fb0ff; --dial: #1b2540; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0e1424; --card: #151d31; --ink: #e8e6dd; --muted: #9aa3b8; --grid: #26304a;
+  --signal: #ff7a45; --est: #4cc3b4; --safe: #ff6b5e; --ok: #6fcf86; --warn: #f0b44c;
+  --focus: #8fb0ff; --dial: #1b2540; color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: inherit; }
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: "Barlow", "Helvetica Neue", Arial, sans-serif; line-height: 1.5; }
+main { max-width: 1120px; margin: 0 auto; padding: 2.25rem 1.25rem 4rem; }
+h1, h2, .label, .mode, .btn { font-family: "Barlow Condensed", "Arial Narrow", sans-serif; }
+h1 { font-size: clamp(2.3rem, 6vw, 4.2rem); line-height: .95; margin: 0 0 .8rem; letter-spacing: -.01em; font-weight: 700; text-transform: uppercase; }
+.lede { max-width: 64ch; color: var(--muted); font-size: 1.05rem; margin: 0; }
+.links { display: flex; gap: 1.25rem; flex-wrap: wrap; margin-top: .9rem; }
+a { color: inherit; text-underline-offset: 3px; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+.console { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 2rem; margin-top: 2rem; align-items: start; }
+.console > *, .charts > * { min-width: 0; }
+.dial-wrap { position: relative; }
+#dial { width: 100%; aspect-ratio: 1; display: block; cursor: crosshair; touch-action: none; }
+.dial-hint { text-align: center; color: var(--muted); font-size: .9rem; margin-top: .25rem; }
+.legend { display: flex; gap: 1.1rem; justify-content: center; flex-wrap: wrap; font-size: .85rem; color: var(--muted); }
+.legend i { display: inline-block; width: 14px; height: 4px; vertical-align: middle; margin-right: .35rem; border-radius: 2px; }
+
+.panel { background: var(--card); border: 1px solid var(--grid); border-radius: 10px; padding: 1.25rem; }
+.mode-row { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+.mode { font-size: 2.2rem; font-weight: 700; letter-spacing: .04em; line-height: 1; }
+.mode.Detumble { color: var(--warn); } .mode.Pointing { color: var(--ok); } .mode.Safe { color: var(--safe); }
+.mode-desc { color: var(--muted); font-size: .9rem; margin: -.5rem 0 1rem; min-height: 2.6em; }
+.clock { font-family: "JetBrains Mono", ui-monospace, monospace; color: var(--muted); font-size: .9rem; }
+.readouts { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem 1.25rem; margin-bottom: 1rem; }
+.label { font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+.val { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+.wheel-bar { height: 10px; border-radius: 5px; background: var(--grid); position: relative; overflow: hidden; margin-top: .35rem; }
+.wheel-bar span { position: absolute; top: 0; bottom: 0; left: 50%; background: var(--ink); }
+.wheel-bar::before, .wheel-bar::after { content: ""; position: absolute; top: 0; bottom: 0; width: 5%; background: color-mix(in srgb, var(--safe) 35%, transparent); }
+.wheel-bar::before { left: 0; } .wheel-bar::after { right: 0; }
+.faults { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .85rem; color: var(--safe); min-height: 1.4em; margin-bottom: 1rem; }
+
+.controls h2 { font-size: 1.05rem; text-transform: uppercase; letter-spacing: .08em; margin: 1rem 0 .5rem; color: var(--muted); }
+.btns { display: flex; flex-wrap: wrap; gap: .5rem; }
+.btn { font-size: 1rem; font-weight: 600; letter-spacing: .03em; cursor: pointer; border-radius: 6px; padding: .5rem .9rem; border: 1.5px solid var(--ink); background: transparent; color: var(--ink); }
+.btn.primary { background: var(--ink); color: var(--paper); }
+.btn.danger { border-color: var(--safe); color: var(--safe); }
+.btn:active { transform: translateY(1px); }
+.target-row { display: grid; grid-template-columns: 1fr auto; gap: .75rem; align-items: center; }
+.target-row input { width: 100%; accent-color: var(--signal); }
+
+.charts { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 2.25rem; }
+.chart h2, .log h2, .how h2 { font-size: 1.15rem; text-transform: uppercase; letter-spacing: .06em; margin: 0 0 .5rem; }
+.chart canvas { width: 100%; height: 170px; display: block; }
+.lower { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 2.25rem; }
+.lower > * { min-width: 0; }
+.log ol { list-style: none; margin: 0; padding: 0; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .82rem; max-height: 15rem; overflow-y: auto; border-top: 1px solid var(--grid); }
+.log li { padding: .4rem 0; border-bottom: 1px solid var(--grid); display: grid; grid-template-columns: 4.5rem 1fr; gap: .5rem; }
+.log li b { font-weight: 600; } .log .t { color: var(--muted); }
+.how p { margin: 0 0 .75rem; max-width: 62ch; }
+.how code { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .85em; }
+footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--grid); color: var(--muted); font-size: .88rem; }
+
+@media (max-width: 860px) {
+  .console, .charts, .lower { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Keep the satellite pointed</h1>
+    <p class="lede">This page runs my CubeSat attitude-control flight software: the same fixed-point C++ that runs on my Cortex-M3 RTOS, compiled to WebAssembly. Command a slew, knock the spacecraft off course, or break its sun sensor, and watch the firmware detect the problem and recover.</p>
+    <div class="links">
+      <a href="https://github.com/Sair0703/cubesat-adcs">Flight software source</a>
+      <a href="https://github.com/Sair0703/cortex-m-rtos">The RTOS it runs on</a>
+      <a href="https://sair0703.github.io">Sai Anand’s portfolio</a>
+    </div>
+  </header>
+
+  <section class="console" aria-label="Spacecraft console">
+    <div class="dial-wrap">
+      <canvas id="dial" role="img" aria-label="Top-down view of the satellite's attitude. Click to set a new target attitude."></canvas>
+      <div class="legend">
+        <span><i style="background:var(--ink)"></i>Spacecraft</span>
+        <span><i style="background:var(--est)"></i>Flight software’s estimate</span>
+        <span><i style="background:var(--signal)"></i>Commanded target</span>
+      </div>
+      <p class="dial-hint">Click or tap the dial to command a new pointing target.</p>
+    </div>
+
+    <div class="panel">
+      <div class="mode-row">
+        <div><div class="label">Flight mode</div><div class="mode" id="mode" aria-live="polite">—</div></div>
+        <div class="clock" id="clock">T+0.0 s</div>
+      </div>
+      <p class="mode-desc" id="modeDesc"></p>
+      <div class="readouts">
+        <div><div class="label">Attitude</div><div class="val" id="vAngle">—</div></div>
+        <div><div class="label">Target</div><div class="val" id="vTarget">—</div></div>
+        <div><div class="label">Body rate</div><div class="val" id="vRate">—</div></div>
+        <div><div class="label">Wheel torque</div><div class="val" id="vTorque">—</div></div>
+        <div style="grid-column: 1 / -1"><div class="label">Magnetorquers</div><div class="val" id="vMtq">—</div></div>
+        <div style="grid-column: 1 / -1"><div class="label">Reaction wheel speed</div><div class="val" id="vWheel">—</div><div class="wheel-bar" aria-hidden="true"><span id="wheelFill"></span></div></div>
+      </div>
+      <div class="faults" id="faults" aria-live="polite"></div>
+
+      <div class="controls">
+        <h2>Command target</h2>
+        <div class="target-row">
+          <input id="target" type="range" min="-180" max="180" step="5" value="0" aria-label="Target attitude in degrees">
+          <button class="btn primary" id="sendTarget" type="button">Slew</button>
+        </div>
+        <h2>Disturb</h2>
+        <div class="btns">
+          <button class="btn" type="button" data-kick="-12">Kick ↺ 12°/s</button>
+          <button class="btn" type="button" data-kick="12">Kick ↻ 12°/s</button>
+        </div>
+        <h2>Break things</h2>
+        <div class="btns">
+          <button class="btn danger" type="button" id="faultStuck">Freeze sun sensor</button>
+          <button class="btn danger" type="button" id="faultBias">Sun sensor 40° off</button>
+          <button class="btn" type="button" id="clearFaults">Ground: clear fault</button>
+        </div>
+        <h2>Simulation</h2>
+        <div class="btns">
+          <button class="btn" type="button" id="speed">Speed: 1×</button>
+          <button class="btn" type="button" id="reset">Re-launch tumbling</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="charts">
+    <div class="chart"><h2>Attitude vs. target (last 60 s)</h2><canvas id="chartAngle" aria-label="Chart of attitude and target over time"></canvas></div>
+    <div class="chart"><h2>Reaction wheel speed (last 60 s)</h2><canvas id="chartWheel" aria-label="Chart of reaction wheel speed over time"></canvas></div>
+  </section>
+
+  <section class="lower">
+    <div class="log"><h2>Flight event log</h2><ol id="log"></ol></div>
+    <div class="how">
+      <h2>What the firmware is doing</h2>
+      <p><b>Detumble.</b> At release the satellite is spinning. The controller ignores attitude and uses the gyro alone to brake the rotation through the reaction wheel.</p>
+      <p><b>Point.</b> A complementary filter fuses the gyro with the sun sensor into an attitude estimate. A PID controller with anti-windup and a slew-rate limit steers to the target.</p>
+      <p><b>Protect itself.</b> A real sensor is never perfectly still, so identical readings mean it froze, and a persistent mismatch with the gyro means it’s lying. Either one drops the spacecraft into <b>SAFE</b> mode, which stops trusting the sun sensor and only damps rotation until the ground clears the fault.</p>
+      <p><b>Manage momentum.</b> Every correction leaves spin stored in the reaction wheel. Kick the satellite a few times and the wheel nears its 6,000 rpm limit. Above 3,000 rpm the firmware switches on the magnetorquers, electromagnets that push against Earth’s magnetic field, and holds pointing while the wheel spins back down.</p>
+    </div>
+  </section>
+
+  <footer>All control math runs in the 5 KB WebAssembly module built from the C++ flight software, with Q16.16 fixed-point arithmetic, exactly as on the microcontroller. Built by Sai Anand.</footer>
+</main>
+
+<script>
+(async () => {
+  const bytes = Uint8Array.from(atob("AGFzbQEAAAABMwpgAn9/AGABfwBgA39/fwBgBH99fX8AYAR/fX19AGADfX1/AGAAAGABfQBgAAF9YAABfwMeHQABAAICAwAABAMBBQYHAQcGCAgICAkICAgJCQkIBQMBAAIGCAF/AUGAiQQLB44CEwZtZW1vcnkCAAlzaW1fcmVzZXQACwhzaW1fc3RlcAAMCHNpbV9raWNrAA0Nc2ltX3NldF9mYXVsdAAOE2FkY3NfY29tbWFuZF90YXJnZXQADxFhZGNzX2NsZWFyX2ZhdWx0cwAQCHNpbV90aW1lABEJc2ltX2FuZ2xlABIIc2ltX3JhdGUAEw1zaW1fd2hlZWxfcnBtABQJc2ltX2ZhdWx0ABUOYWRjc19lc3RfYW5nbGUAFgthZGNzX3RhcmdldAAXC2FkY3NfdG9ycXVlABgJYWRjc19tb2RlABkLYWRjc19mYXVsdHMAGgxhZGNzX2R1bXBpbmcAGxFhZGNzX21hZ25ldG9ycXVlcgAcCpkeHXsAIABBADoAFCAAQgA3AgwgAEEAOwEAIABBADYCMCAAQoCAgIDw/////wA3AiAgAEIANwIoIAAgACgCHDYCCCAAIAFBgICgC28iAUGAgOB0aiABIAFB///PBUobIgFBgICgC2ogASABQYCAsHpIGyIBNgIYIAAgATYCBAsrACAAQQA2AjAgAEEAOgAAIABBAToANCAAQgA3AiggACAALQABQQRxOgABC+gCAQR/IAAgASABKAIEIgIgACgCGCIDIAE0AgBCnwp+QoCAAnxCEIinIgRqIgVBH3VBgICAgHhzIAUgBEEASCAFIANIcxtBgICgC28iBUGAgOB0aiAFIAVB///PBUobIgVBgICgC2ogBSAFQYCAsHpIGyIDayIFQR91QYCAgIB4cyAFIANBAEogBSACSHMbQYCAoAtvIgVBgIDgdGogBSAFQf//zwVKGyIFQYCAoAtqIAUgBUGAgLB6SBsiBRCDgICAAAJAIAAtADRFDQAgASgCBCEBIABBADoANCAAIAFBgICgC28iAUGAgOB0aiABIAFB///PBUobIgFBgICgC2ogASABQYCAsHpIGzYCGA8LAkAgAC0AAEECRw0AIAAgAzYCGA8LIAAgAyAFrEKfCn5CgIACfEIQiKdqQYCAoAtvIgFBgIDgdGogASABQf//zwVKGyIBQYCAoAtqIAEgAUGAgLB6SBs2AhgLqAICAX8BfiAAIAAoAihBAWpBACABKAIEIAAoAiRGGyIDNgIoIAAgASgCBDYCJAJAIANBGUgNACAAIAAtAAFBAXI6AAELAkAgAC0ANA0AIAAgACgCLEEBakEAQgAgAqx9IgRC/////wcgBEL/////B1MbpyACIAJBAEgbQYCAPEobIgI2AiwgAkEKSA0AIAAgAC0AAUECcjoAAQsCQAJAAkBCACABKAIIIgGsfSIEQv////8HIARC/////wdTG6cgASABQQBIGyICQYGA4KgBSA0AIAAtAAFBBHIhAQwBCyAALQABIQEgAkH///+VAUoNASABQfsBcSEBCyAAIAE6AAELAkAgAUEDcUUNACAALQAAQf8BcUECRg0AIABBADYCICAAQQI6AAALC90GAwF/An4DfyABIAIQgoCAgABBACEDAkACQAJAAkACQCABLQAADgMAAQIECyABIAEoAjBBAWpBAEIAIAIoAgAiA6wiBH0iBUL/////ByAFQv////8HUxunIAMgA0EASBtBzZkBSBsiBjYCMEIAIARC5swFfkKAgAJ8QhCHIgRCgICAgHggBEKAgICAeFUbIgRC/////wcgBEL/////B1MbfSIEQv////8HIARC/////wdTG6chAyAGQTJIDQIgAUEANgIgIAFBAToAAAwCCyACNAIAIQQCQAJAIAEoAhwiBiABKAIYIgdrIgNBH3VBgICAgHhzIAMgB0EASiADIAZIcxtBgICgC28iA0GAgOB0aiADIANB///PBUobIgNBgICgC2ogAyADQYCAsHpIGyIDIANBH3UiBnMgBmtBgIAISQ0AIAEoAiAhBgwBCyABIAEoAiAiByADrELNGX5CgIACfEIQiEKfCn5CgIACfEIQiKciCGoiBkEfdUGAgICAeHMgBiAIQQBIIAYgB0hzGyIGQYCABCAGQYCABEgbIgZBgIB8IAZBgIB8ShsiBjYCIAsgA0G6zyYgA0G6zyZIGyIDQcawWSADQcawWUobrEK4vQN+QoCAAnxCEIinIgcgBmoiA0EfdUGAgICAeHMgAyAGQQBIIAMgB0hzGyIGIARC5swFfkKAgAJ8QhCHIgRCgICAgHggBEKAgICAeFUbIgRC/////wcgBEL/////B1MbpyIHayIDQR91QYCAgIB4cyADIAdBAEogAyAGSHMbIQMMAQtCACACNAIAQubMBX5CgIACfEIQhyIEQoCAgIB4IARCgICAgHhVGyIEQv////8HIARC/////wdTG30iBEL/////ByAEQv////8HUxunIQMLIANBgIAQIANBgIAQSBsiA0GAgHAgA0GAgHBKGyEDCyABIAM2AgwgASABKQIYNwIEQgAgAigCCCICrH0iBEL/////ByAEQv////8HUxunIAIgAkEASBshBwJAAkACQCABLQAUDQBBACEGIAdBgYDg3QBIDQIgAUEBOgAUDAELIAdB//+vCUoNAEEAIQYgAUEAOgAUDAELQbPmfEHNmQMgAkEAShshBgsgACAGNgIEIAAgAzYCACABIAY2AhALcwACQCABQwAANENgRQ0AA0AgAUMAALTDkiIBQwAANENgDQALCwJAIAFDAAA0w11FDQADQCABQwAAtEOSIgFDAAA0w10NAAsLIABBADoAOCAAQgA3AiggACACOAIkIAAgATgCICAAIANBASADQQFLGzYCNAtWAQF/I4CAgIAAQRBrIgIkgICAgAACQCABQQFHDQAgAC0AOEH/AXFBAUYNACACQQRqIAAQh4CAgAAgACACKgIIOAIwCyAAIAE6ADggAkEQaiSAgICAAAviBAIEfwF9IAAgASoCFCABKAI0IgJBDXQgAnMiAkERdiACcyICQQV0IAJzIgJB////B3GzQwAAgDOUQwAAAACSIAJBDXQgAnMiAkERdiACcyICQQV0IAJzIgJB////B3GzQwAAgDOUkiACQQ10IAJzIgJBEXYgAnMiAkEFdCACcyICQf///wdxs0MAAIAzlJIgAkENdCACcyICQRF2IAJzIgJBBXQgAnMiAkH///8HcbNDAACAM5SSQwAAAMCSQ9ez3T+UlCABKgIkIAEqAhiSkjgCACABIAJBDXQgAnMiAkERdiACcyICQQV0IAJzIgJBDXQgAnMiA0ERdiADcyIDQQV0IANzIgNBDXQgA3MiBEERdiAEcyIEQQV0IARzIgRBDXQgBHMiBUERdiAFcyIFQQV0IAVzIgU2AjQCQCABKgIcIAJB////B3GzQwAAgDOUQwAAAACSIANB////B3GzQwAAgDOUkiAEQf///wdxs0MAAIAzlJIgBUH///8HcbNDAACAM5SSQwAAAMCSQ9ez3T+UlCABKgIgkiIGQwAANENgRQ0AA0AgBkMAALTDkiIGQwAANENgDQALCwJAIAZDAAA0w11FDQADQCAGQwAAtEOSIgZDAAA0w10NAAsLIAAgBjgCBAJAAkACQAJAIAEtADhBf2oOAgABAwsgASoCMCEGDAELAkAgBkMAACBCkiIGQwAANENgRQ0AA0AgBkMAALTDkiIGQwAANENgDQALCyAGQwAANMNdRQ0AA0AgBkMAALRDkiIGQwAANMNdDQALCyAAIAY4AgQLIAAgASoCKDgCCAuNAgECfSAAKgIMIgSMIgUgBCACIAQgAl0bIgIgAiAFXRshAgJAAkACQCAAKgIoIgQgACoCCCIFYEUNACACQwAAAABdDQELIAQgBYxfIAJDAAAAAF5xQQFHDQELQwAAAAAhAgsgACACOAIsIAAgAkMAAHrElSAAKgIElSABlEPryRhBlCAEkjgCKCAAIAAqAiQgAiADkiAAKgIQkkMAAHpElSAAKgIAlSABlEM1+o48lZIiAjgCJAJAIAIgAZQgACoCIJIiAkMAADRDYEUNAANAIAJDAAC0w5IiAkMAADRDYA0ACwsCQCACQwAANMNdRQ0AA0AgAkMAALRDkiICQwAANMNdDQALCyAAIAI4AiALvQECAn8BfiOAgICAAEEQayIEJICAgIAAIABBOGoiBSABIAIgAxCFgICAACAEQQRqIAUQh4CAgAACQAJAIAQqAggiAkMAAIBHlEMAAAA/QwAAAL8gAkMAAAAAYBuSIgKLQwAAAF9dRQ0AIAKuIQYMAQtCgICAgICAgICAfyEGCyAAIAZCgICAgHggBkKAgICAeFUbIgZC/////wcgBkL/////B1MbpxCAgICAACAAQQA2AnQgBEEQaiSAgICAAAvHAwMCfwF9AX4jgICAgABBIGsiASSAgICAACABQRRqIABBOGoiAhCHgICAAAJAAkAgASoCFCIDQwAAgEeUQwAAAD9DAAAAvyADQwAAAABgG5IiA4tDAAAAX11FDQAgA64hBAwBC0KAgICAgICAgIB/IQQLIAEgBEKAgICAeCAEQoCAgIB4VRsiBEL/////ByAEQv////8HUxs+AggCQAJAIAEqAhgiA0MAAIBHlEMAAAA/QwAAAL8gA0MAAAAAYBuSIgOLQwAAAF9dRQ0AIAOuIQQMAQtCgICAgICAgICAfyEECyABIARCgICAgHggBEKAgICAeFUbIgRC/////wcgBEL/////B1MbPgIMAkACQCABKgIcIgNDAACAR5RDAAAAP0MAAAC/IANDAAAAAGAbkiIDi0MAAABfXUUNACADriEEDAELQoCAgICAgICAgH8hBAsgASAEQoCAgIB4IARCgICAgHhVGyIEQv////8HIARC/////wdTGz4CECABIAAgAUEIahCEgICAACACQwrXozwgASgCALJDAACAN5QgASgCBLJDAACAN5QQiICAgAAgACAAKAJ0QQFqNgJ0IAFBIGokgICAgAALFABBgIiAgAAgACABIAIQiYCAgAALDgBBgIiAgAAQioCAgAALFwBBAEEAKgLciICAACAAkjgC3IiAgAALFABBuIiAgAAgAEH/AXEQhoCAgAALogECAX4BfwJAAkAgAEMAAIBHlEMAAAA/QwAAAL8gAEMAAAAAYBuSIgCLQwAAAF9dRQ0AIACuIQEMAQtCgICAgICAgICAfyEBC0EAIAFCgICAgHggAUKAgICAeFUbIgFC/////wcgAUL/////B1Mbp0GAgKALbyICQYCA4HRqIAIgAkH//88FShsiAkGAgKALaiACIAJBgICwekgbNgKciICAAAsOAEGAiICAABCBgICAAAsSAEEAKAL0iICAALNDAABIQpULCwBBACoC2IiAgAALCwBBACoC3IiAgAALCwBBACoC4IiAgAALCwBBAC0A8IiAgAALEgBBACgChIiAgACyQwAAgDeUCxIAQQAoAoiIgIAAskMAAIA3lAsSAEEAKAKMiICAALJDAACAN5QLCwBBAC0AgIiAgAALCwBBAC0AgYiAgAALCwBBAC0AlIiAgAALEgBBACgCkIiAgACyQwAAgDeUCwt/AQBBgAgLeAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAzcxMPRe3UTgAgLtFAACAQArXozwK16M8zcxMPZqZmT4AAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAADQBQRuYW1lAAoJYWRjcy53YXNtAZ4FHQAbYWRjczo6Q29udHJvbGxlcjo6cmVzZXQoRngpAR9hZGNzOjpDb250cm9sbGVyOjpjbGVhckZhdWx0cygpAjBhZGNzOjpDb250cm9sbGVyOjplc3RpbWF0ZShhZGNzOjpTZW5zb3JzIGNvbnN0JikDOWFkY3M6OkNvbnRyb2xsZXI6Om1vbml0b3JGYXVsdHMoYWRjczo6U2Vuc29ycyBjb25zdCYsIEZ4KQQsYWRjczo6Q29udHJvbGxlcjo6c3RlcChhZGNzOjpTZW5zb3JzIGNvbnN0JikFLXNpbTo6UGxhbnQ6OnJlc2V0KGZsb2F0LCBmbG9hdCwgdW5zaWduZWQgaW50KQYjc2ltOjpQbGFudDo6c2V0RmF1bHQodW5zaWduZWQgY2hhcikHEnNpbTo6UGxhbnQ6OnJlYWQoKQglc2ltOjpQbGFudDo6c3RlcChmbG9hdCwgZmxvYXQsIGZsb2F0KQktc2ltOjpXb3JsZDo6cmVzZXQoZmxvYXQsIGZsb2F0LCB1bnNpZ25lZCBpbnQpChJzaW06OldvcmxkOjpzdGVwKCkLCXNpbV9yZXNldAwIc2ltX3N0ZXANCHNpbV9raWNrDg1zaW1fc2V0X2ZhdWx0DxNhZGNzX2NvbW1hbmRfdGFyZ2V0EBFhZGNzX2NsZWFyX2ZhdWx0cxEIc2ltX3RpbWUSCXNpbV9hbmdsZRMIc2ltX3JhdGUUDXNpbV93aGVlbF9ycG0VCXNpbV9mYXVsdBYOYWRjc19lc3RfYW5nbGUXC2FkY3NfdGFyZ2V0GAthZGNzX3RvcnF1ZRkJYWRjc19tb2RlGgthZGNzX2ZhdWx0cxsMYWRjc19kdW1waW5nHBFhZGNzX21hZ25ldG9ycXVlcgcSAQAPX19zdGFja19wb2ludGVyCQgBAAUuZGF0YQA4CXByb2R1Y2VycwEMcHJvY2Vzc2VkLWJ5AQxVYnVudHUgY2xhbmcRMTguMS4zICgxdWJ1bnR1MSkALA90YXJnZXRfZmVhdHVyZXMCKw9tdXRhYmxlLWdsb2JhbHMrCHNpZ24tZXh0"), c => c.charCodeAt(0));
+  const { instance } = await WebAssembly.instantiate(bytes, {});
+  const w = instance.exports;
+
+  const MODES = ["Detumble", "Pointing", "Safe"];
+  const MODE_DESC = {
+    Detumble: "Braking the spin with the gyro and reaction wheel.",
+    Pointing: "Fusing gyro and sun sensor, steering to the commanded target.",
+    Safe: "Sun sensor fault detected. Ignoring it and holding the spacecraft steady.",
+  };
+  const STEP_DT = 0.02;
+  const $ = id => document.getElementById(id);
+  const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  let speed = 1, acc = 0, last = performance.now();
+  let history = [], lastMode = -1, lastFaults = 0, lastDump = 0;
+
+  function log(text, kind) {
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="t">T+${w.sim_time().toFixed(1)}</span><span>${kind ? `<b>${kind}</b> ` : ""}${text}</span>`;
+    $("log").prepend(li);
+    while ($("log").children.length > 40) $("log").lastChild.remove();
+  }
+
+  function reset() {
+    w.sim_reset(30, 8 + Math.random() * 4, (Math.random() * 1e9) | 0);
+    w.adcs_command_target(0);
+    $("target").value = 0;
+    history = []; lastMode = -1; lastFaults = 0; lastDump = 0;
+    $("log").innerHTML = "";
+    log("Released from the deployer, tumbling at " + w.sim_rate().toFixed(1) + "°/s", "LAUNCH");
+  }
+
+  // ---- Controls ----
+  $("sendTarget").onclick = () => { w.adcs_command_target(+$("target").value); log(`Slew to ${$("target").value}°`, "CMD"); };
+  document.querySelectorAll("[data-kick]").forEach(b => b.onclick = () => { w.sim_kick(+b.dataset.kick); log(`Hit by a ${Math.abs(b.dataset.kick)}°/s disturbance`, "KICK"); });
+  $("faultStuck").onclick = () => { w.sim_set_fault(1); log("Sun sensor output frozen", "INJECT"); };
+  $("faultBias").onclick = () => { w.sim_set_fault(2); log("Sun sensor now reads 40° off", "INJECT"); };
+  $("clearFaults").onclick = () => { w.sim_set_fault(0); w.adcs_clear_faults(); log("Sensor repaired; fault cleared by ground", "CMD"); };
+  $("speed").onclick = () => { speed = speed === 1 ? 4 : speed === 4 ? 10 : 1; $("speed").textContent = `Speed: ${speed}×`; };
+  $("reset").onclick = reset;
+
+  const dial = $("dial");
+  function dialTarget(ev) {
+    const r = dial.getBoundingClientRect();
+    const x = ev.clientX - r.left - r.width / 2, y = ev.clientY - r.top - r.height / 2;
+    if (Math.hypot(x, y) < r.width * 0.12) return;
+    const deg = Math.round(Math.atan2(x, -y) * 180 / Math.PI / 5) * 5;
+    w.adcs_command_target(deg); $("target").value = deg; log(`Slew to ${deg}°`, "CMD");
+  }
+  dial.addEventListener("pointerdown", dialTarget);
+
+  // ---- Drawing ----
+  function setupCanvas(c) {
+    const dpr = window.devicePixelRatio || 1, r = c.getBoundingClientRect();
+    if (c.width !== Math.round(r.width * dpr) || c.height !== Math.round(r.height * dpr)) {
+      c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr);
+    }
+    const g = c.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return [g, r.width, r.height];
+  }
+
+  function drawDial() {
+    const [g, W, H] = setupCanvas(dial);
+    const cx = W / 2, cy = H / 2, R = Math.min(W, H) * 0.46;
+    g.clearRect(0, 0, W, H);
+    g.fillStyle = css("--dial"); g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = css("--grid"); g.lineWidth = 1;
+    for (let r = R * 0.35; r < R; r += R * 0.21) { g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.stroke(); }
+    g.fillStyle = css("--muted"); g.font = `600 ${Math.max(11, R * 0.06)}px "Barlow Condensed", sans-serif`;
+    g.textAlign = "center"; g.textBaseline = "middle";
+    for (let d = -180; d < 180; d += 10) {
+      const a = d * Math.PI / 180, major = d % 90 === 0;
+      const r1 = R * (major ? 0.9 : 0.95);
+      g.strokeStyle = css(major ? "--ink" : "--muted"); g.lineWidth = major ? 2 : 1;
+      g.beginPath(); g.moveTo(cx + Math.sin(a) * r1, cy - Math.cos(a) * r1); g.lineTo(cx + Math.sin(a) * R, cy - Math.cos(a) * R); g.stroke();
+      if (major) g.fillText(`${d}°`, cx + Math.sin(a) * R * 0.8, cy - Math.cos(a) * R * 0.8);
+    }
+    // target marker
+    const ta = w.adcs_target() * Math.PI / 180;
+    g.fillStyle = css("--signal");
+    g.save(); g.translate(cx + Math.sin(ta) * R, cy - Math.cos(ta) * R); g.rotate(ta);
+    g.beginPath(); g.moveTo(0, 4); g.lineTo(-9, -12); g.lineTo(9, -12); g.closePath(); g.fill(); g.restore();
+    g.strokeStyle = css("--signal"); g.setLineDash([5, 6]); g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.sin(ta) * R * 0.86, cy - Math.cos(ta) * R * 0.86); g.stroke(); g.setLineDash([]);
+
+    // estimate ghost
+    drawSat(g, cx, cy, R, w.adcs_est_angle(), css("--est"), true);
+    // spacecraft
+    drawSat(g, cx, cy, R, w.sim_angle(), css("--ink"), false);
+  }
+
+  function drawSat(g, cx, cy, R, deg, color, ghost) {
+    const s = R * 0.2;
+    g.save(); g.translate(cx, cy); g.rotate(deg * Math.PI / 180);
+    g.strokeStyle = color; g.lineWidth = ghost ? 2 : 2.5;
+    if (ghost) { g.setLineDash([4, 4]); }
+    else { g.fillStyle = color; }
+    // solar panels
+    const pw = s * 1.5, ph = s * 0.55;
+    for (const side of [-1, 1]) {
+      g.beginPath(); g.rect(side > 0 ? s * 0.55 : -s * 0.55 - pw, -ph / 2, pw, ph);
+      ghost ? g.stroke() : (g.globalAlpha = 0.85, g.fill(), g.globalAlpha = 1);
+    }
+    // bus
+    g.beginPath(); g.rect(-s * 0.55, -s * 0.55, s * 1.1, s * 1.1);
+    if (ghost) g.stroke(); else { g.fillStyle = css("--card"); g.fill(); g.stroke(); }
+    // boresight
+    g.beginPath(); g.moveTo(0, -s * 0.55); g.lineTo(0, -R * 0.62); g.stroke();
+    if (!ghost) { g.fillStyle = color; g.beginPath(); g.arc(0, -R * 0.62, 4, 0, Math.PI * 2); g.fill(); }
+    g.restore(); g.setLineDash([]);
+  }
+
+  function drawChart(id, series, lo, hi, zeroLine, bands) {
+    const [g, W, H] = setupCanvas($(id));
+    g.clearRect(0, 0, W, H);
+    const pad = { l: 44, r: 8, t: 6, b: 18 };
+    const x = i => pad.l + (W - pad.l - pad.r) * i / 599;
+    const y = v => pad.t + (H - pad.t - pad.b) * (1 - (v - lo) / (hi - lo));
+    g.strokeStyle = css("--grid"); g.fillStyle = css("--muted"); g.lineWidth = 1;
+    g.font = '11px "JetBrains Mono", monospace'; g.textAlign = "right"; g.textBaseline = "middle";
+    for (const v of zeroLine) { g.beginPath(); g.moveTo(pad.l, y(v)); g.lineTo(W - pad.r, y(v)); g.stroke(); g.fillText(v, pad.l - 6, y(v)); }
+    if (bands) { g.fillStyle = css("--safe"); g.globalAlpha = 0.12; for (const [a, b] of bands) g.fillRect(pad.l, y(b), W - pad.l - pad.r, y(a) - y(b)); g.globalAlpha = 1; }
+    const off = 600 - history.length;
+    for (const s of series) {
+      g.strokeStyle = s.color; g.lineWidth = s.width || 2; if (s.dash) g.setLineDash(s.dash);
+      g.beginPath(); let started = false, prev = null;
+      history.forEach((h, i) => {
+        const v = s.get(h);
+        if (prev !== null && Math.abs(v - prev) > 180 && s.wraps) { started = false; }
+        const px = x(i + off), py = y(Math.max(lo, Math.min(hi, v)));
+        started ? g.lineTo(px, py) : g.moveTo(px, py); started = true; prev = v;
+      });
+      g.stroke(); g.setLineDash([]);
+    }
+  }
+
+  function updatePanel() {
+    const mode = MODES[w.adcs_mode()], faults = w.adcs_faults();
+    $("mode").textContent = mode.toUpperCase(); $("mode").className = "mode " + mode;
+    $("modeDesc").textContent = MODE_DESC[mode];
+    $("clock").textContent = `T+${w.sim_time().toFixed(1)} s`;
+    $("vAngle").textContent = `${w.sim_angle().toFixed(1)}°`;
+    $("vTarget").textContent = `${w.adcs_target().toFixed(0)}°`;
+    $("vRate").textContent = `${w.sim_rate().toFixed(2)}°/s`;
+    $("vTorque").textContent = `${w.adcs_torque().toFixed(2)} mNm`;
+    const rpm = w.sim_wheel_rpm();
+    $("vWheel").textContent = `${Math.round(rpm).toLocaleString()} rpm`;
+    const f = Math.max(-1, Math.min(1, rpm / 6000)) * 50;
+    $("wheelFill").style.left = (f < 0 ? 50 + f : 50) + "%"; $("wheelFill").style.width = Math.abs(f) + "%";
+    const dumping = w.adcs_dumping();
+    $("vMtq").textContent = dumping ? `Dumping momentum (${w.adcs_magnetorquer().toFixed(1)} mNm)` : "Idle";
+    if (dumping && !lastDump) log("Wheel momentum high: magnetorquers on to spin it down", "DUMP");
+    if (!dumping && lastDump) log("Momentum dump complete, wheel back near zero", "DUMP");
+    lastDump = dumping;
+    const names = [];
+    if (faults & 1) names.push("SUN_STUCK"); if (faults & 2) names.push("SUN_MISMATCH"); if (faults & 4) names.push("WHEEL_SAT");
+    $("faults").textContent = names.length ? "FAULT FLAGS: " + names.join("  ") : "";
+
+    if (w.adcs_mode() !== lastMode) {
+      if (lastMode !== -1 || mode !== "Detumble") log(MODE_DESC[mode], mode.toUpperCase());
+      lastMode = w.adcs_mode();
+    }
+    const newFaults = faults & ~lastFaults;
+    if (newFaults & 1) log("Detected frozen sun sensor", "FAULT");
+    if (newFaults & 2) log("Detected sun sensor disagreeing with gyro", "FAULT");
+    if (newFaults & 4) log("Reaction wheel near its speed limit", "WARN");
+    lastFaults = faults;
+  }
+
+  function frame(now) {
+    acc += Math.min(0.25, (now - last) / 1000) * speed; last = now;
+    let n = 0;
+    while (acc >= STEP_DT && n < 600) {
+      w.sim_step(); acc -= STEP_DT; n++;
+      if (Math.round(w.sim_time() / STEP_DT) % 5 === 0) {
+        history.push({ a: w.sim_angle(), t: w.adcs_target(), e: w.adcs_est_angle(), wh: w.sim_wheel_rpm() });
+        if (history.length > 600) history.shift();
+      }
+    }
+    drawDial();
+    drawChart("chartAngle", [
+      { get: h => h.t, color: css("--signal"), width: 1.5, dash: [5, 5], wraps: true },
+      { get: h => h.e, color: css("--est"), width: 1.5, wraps: true },
+      { get: h => h.a, color: css("--ink"), width: 2, wraps: true },
+    ], -180, 180, [-180, -90, 0, 90, 180]);
+    drawChart("chartWheel", [{ get: h => h.wh, color: css("--ink"), width: 2 }], -6500, 6500, [-6000, -3000, 0, 3000, 6000], [[5400, 6500], [-6500, -5400]]);
+    updatePanel();
+    requestAnimationFrame(frame);
+  }
+
+  reset();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
