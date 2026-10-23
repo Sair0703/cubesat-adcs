@@ -1,1 +1,0 @@
-# cubesat-adcs
